@@ -1,0 +1,15 @@
+# Virtual Environment
+venv/
+
+# Environment Variables
+.env
+
+# Python Bytecode
+__pycache__/
+*.pyc
+
+# macOS system files
+.DS_Store
+
+# IDEs
+.cursor/
