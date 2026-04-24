@@ -1,0 +1,134 @@
+# Database Connections and ORM: Django vs FastAPI
+
+This document explains how database connections are established and managed in Django compared to FastAPI, and provides an overview of ORMs.
+
+## 1. What is an ORM?
+
+**ORM stands for Object-Relational Mapping** (or Object-Relational Mapper).
+
+It is a technique (or library) that allows you to query and manipulate data from a database using an Object-Oriented paradigm (like Python classes and objects) instead of writing raw SQL queries.
+
+*   **Object:** Your Python code (e.g., a class like `User` or `Product`).
+*   **Relational:** Your database (e.g., a PostgreSQL or MySQL table with rows and columns).
+*   **Mapping:** The ORM connects the two. It translates your Python code into SQL queries behind the scenes.
+
+**Example Comparison:**
+
+Raw SQL:
+```sql
+SELECT * FROM users WHERE email = 'test@example.com';
+```
+
+Django ORM:
+```python
+User.objects.get(email='test@example.com')
+```
+
+SQLAlchemy (typically used with FastAPI):
+```python
+db.query(User).filter(User.email == 'test@example.com').first()
+```
+
+The ORM takes care of generating the correct SQL, executing it securely (preventing SQL injection), and converting the database results back into Python objects.
+
+---
+
+## 2. Database Connections: Django vs FastAPI
+
+Both frameworks require a database driver to communicate with the database (e.g., `psycopg2` for PostgreSQL, `mysqlclient` for MySQL). However, how they manage the connection lifecycle differs significantly.
+
+### A. Django (Batteries-Included)
+
+Django handles database connections, pooling, and ORM setup automatically based on a simple configuration file.
+
+1.  **The Configuration (`settings.py`)**:
+    You tell Django which built-in database backend wrapper to use and provide your credentials in the `DATABASES` dictionary.
+
+    ```python
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql", # Tells Django to use the psycopg2 driver
+            "NAME": "mydatabase",
+            "USER": "myuser",
+            "PASSWORD": "mypassword",
+            "HOST": "127.0.0.1",
+            "PORT": "5432",
+        }
+    }
+    ```
+
+2.  **How it works**:
+    When Django starts, it reads this configuration, imports the necessary driver (like `psycopg2` or `mysqlclient` which you installed via pip), and manages the connection pool internally. When a request comes in, Django automatically opens a database connection, and when the request finishes, it closes or returns the connection to the pool.
+
+### B. FastAPI (Micro-Framework)
+
+FastAPI does not come with a built-in ORM or database connection manager. You have to explicitly wire these pieces together using third-party libraries like SQLAlchemy (for the ORM) and databases/asyncpg/psycopg2 (for the connection).
+
+1.  **The Dependencies**:
+    You install the ORM and the driver manually.
+    ```bash
+    pip install fastapi sqlalchemy psycopg2-binary
+    ```
+
+2.  **The Setup (Manual Engine and Session Factory)**:
+    You must write code to create the connection pool (the "Engine") and the factory that generates database sessions.
+
+    ```python
+    # database.py
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker, declarative_base
+
+    SQLALCHEMY_DATABASE_URL = "postgresql+psycopg2://user:password@localhost/dbname"
+
+    # Create the Engine (Manages the connection pool)
+    engine = create_engine(SQLALCHEMY_DATABASE_URL)
+
+    # Create a SessionLocal class (Factory for individual database sessions)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    # Create a Base class for your models to inherit from
+    Base = declarative_base()
+    ```
+
+3.  **Dependency Injection (Managing the Connection)**:
+    You explicitly define a dependency to manage the connection lifecycle per request, so you can inject the session into your route functions.
+
+    ```python
+    # dependencies.py
+    from .database import SessionLocal
+
+    def get_db():
+        db = SessionLocal() # Grab a connection from the pool
+        try:
+            yield db        # Pass the connection to the route
+        finally:
+            db.close()      # Return the connection to the pool
+    ```
+
+4.  **Using the Database in a Route**:
+    You inject the database session into your endpoint.
+
+    ```python
+    # main.py
+    from fastapi import FastAPI, Depends
+    from sqlalchemy.orm import Session
+    from .dependencies import get_db
+    from . import models
+
+    app = FastAPI()
+
+    @app.get("/users/{user_id}")
+    def read_user(user_id: int, db: Session = Depends(get_db)):
+        # Use the injected 'db' session to make queries
+        user = db.query(models.User).filter(models.User.id == user_id).first()
+        return user
+    ```
+
+### Summary Comparison
+
+| Feature | Django | FastAPI (with SQLAlchemy) |
+| :--- | :--- | :--- |
+| **Driver** | `psycopg2` / `mysqlclient` | `psycopg2` / `asyncpg` |
+| **ORM** | Built-in Django ORM | Usually SQLAlchemy |
+| **Setup** | Declarative (`DATABASES` dict in `settings.py`) | Imperative (Write code to create `engine` and `sessionmaker`) |
+| **Connection Lifecycle** | Automatic (Middleware handles it) | Explicit (Using `Depends(get_db)` injection) |
